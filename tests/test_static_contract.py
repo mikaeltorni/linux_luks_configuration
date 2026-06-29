@@ -58,3 +58,23 @@ def test_persistent_configuration_is_idempotent() -> None:
     assert "# linux_luks_configuration:" in implementation
     assert "replace_tagged_line" in implementation
     assert 'cryptsetup luksUUID "$device"' in implementation
+
+
+def test_passphrase_collected_up_front_and_used_non_interactively() -> None:
+    """The passphrase is prompted up front and fed to cryptsetup non-interactively.
+
+    Under the master installer stdin is detached, so a mid-run cryptsetup prompt
+    would hang. The encrypted-volume step must collect LUKS_PASSPHRASE first and
+    pass it via --key-file -."""
+    implementation = read("lib/luks_configuration.sh")
+    installer = read("install.sh")
+
+    assert "luks_prompt_passphrase()" in implementation
+    assert "LUKS_PASSPHRASE" in implementation
+    # Format and open must not prompt interactively.
+    assert "--verify-passphrase" not in implementation
+    assert "luksFormat --type luks2 --batch-mode --key-file -" in implementation
+    assert "cryptsetup open --key-file -" in implementation
+    # Standalone installer prompts at the beginning when the volume is selected.
+    assert "luks_selection_requests_volume" in installer
+    assert "luks_prompt_passphrase" in installer

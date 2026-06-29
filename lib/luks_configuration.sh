@@ -6,6 +6,34 @@
 # a new container. Existing signatures require the additional explicit
 # LUKS_ALLOW_WIPE_SIGNATURES=YES acknowledgement.
 
+# luks_prompt_passphrase - Collect the LUKS passphrase once, up front, into the
+# LUKS_PASSPHRASE environment variable. The volume step then formats/opens the
+# device non-interactively (cryptsetup --key-file -), so a passphrase prompt
+# never appears mid-install when stdin is detached under the master installer.
+# No-op when LUKS_PASSPHRASE is already set; errors when no terminal is available.
+luks_prompt_passphrase() {
+  [ -n "${LUKS_PASSPHRASE:-}" ] && return 0
+  if [ ! -t 0 ] || [ ! -t 1 ]; then
+    msg "ERROR: LUKS passphrase required; set LUKS_PASSPHRASE or run on a terminal"
+    return 1
+  fi
+  local first second
+  while true; do
+    printf 'Enter LUKS passphrase for the encrypted volume: ' >&2
+    IFS= read -rs first; printf '\n' >&2
+    printf 'Confirm LUKS passphrase: ' >&2
+    IFS= read -rs second; printf '\n' >&2
+    if [ -z "$first" ]; then
+      printf 'Passphrase must not be empty.\n' >&2
+    elif [ "$first" != "$second" ]; then
+      printf 'Passphrases did not match; try again.\n' >&2
+    else
+      break
+    fi
+  done
+  export LUKS_PASSPHRASE="$first"
+}
+
 # install_cryptsetup_tools - install the distro-supported LUKS and ext4 tools.
 install_cryptsetup_tools() {
   msg "Installing LUKS tooling from Ubuntu repositories"
@@ -134,8 +162,8 @@ open_luks_mapping() {
     return 0
   fi
 
-  msg "Opening LUKS mapping $mapping_name; cryptsetup will request its passphrase"
-  cryptsetup open "$device" "$mapping_name"
+  msg "Opening LUKS mapping $mapping_name with the pre-collected passphrase"
+  printf '%s' "${LUKS_PASSPHRASE:-}" | cryptsetup open --key-file - "$device" "$mapping_name"
   printf 'opened\n'
 }
 
@@ -189,10 +217,15 @@ configure_encrypted_volume() {
   assert_safe_luks_target "$device"
   require_target_confirmation "$device"
 
+  # The passphrase is collected up front (luks_prompt_passphrase) so the format
+  # and open steps run non-interactively. Re-prompt here only as a fallback when
+  # a terminal is available; under the master installer it is already set.
+  luks_prompt_passphrase || return 1
+
   if ! cryptsetup isLuks "$device"; then
     require_format_confirmation "$device"
     msg "Formatting confirmed target as LUKS2: $device"
-    cryptsetup luksFormat --type luks2 --verify-passphrase "$device"
+    printf '%s' "$LUKS_PASSPHRASE" | cryptsetup luksFormat --type luks2 --batch-mode --key-file - "$device"
   else
     msg "Reusing existing LUKS container: $device"
   fi

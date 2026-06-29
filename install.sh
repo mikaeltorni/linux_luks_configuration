@@ -26,9 +26,27 @@ isc_activate_components
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/installer/components.sh"
 
+# luks_selection_requests_volume - true when the requested action will configure
+# the encrypted volume (so the passphrase must be collected up front).
+luks_selection_requests_volume() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --all|*encrypted_volume*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 # main - dispatch the explicitly selected LUKS components.
 main() {
   msg "Starting explicitly selected LUKS configuration"
+  # Ask for the LUKS passphrase at the very beginning when the encrypted volume
+  # is selected, mirroring the master installer, so the (non-interactive) volume
+  # step never blocks for input later in the run.
+  if luks_selection_requests_volume "$@"; then
+    luks_prompt_passphrase || exit 1
+  fi
   component_main "$@"
   msg "Selected LUKS configuration completed"
 }
