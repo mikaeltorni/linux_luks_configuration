@@ -20,6 +20,34 @@ There is no guarantee that these scripts are suitable for any particular
 system or purpose. See [LICENSE.md](LICENSE.md) for the full warranty disclaimer
 and limitation of liability.
 
+## Safety model
+
+Both installer components are default-off. The default setup chain therefore
+performs no LUKS action. Volume provisioning refuses mounted targets and any
+device in the running root filesystem's block-device ancestry. Every volume
+action requires the exact canonical device confirmation. A new container also
+requires the formatting acknowledgements below:
+
+- `LUKS_TARGET_DEVICE` — the test block device.
+- `LUKS_CONFIRM_DEVICE` — the exact canonical path of that same device.
+- `LUKS_ALLOW_FORMAT=YES` — acknowledgement that formatting destroys data.
+- `LUKS_ALLOW_WIPE_SIGNATURES=YES` — additionally required when signatures
+  already exist on the target.
+
+Optional `LUKS_MAPPING_NAME` and `LUKS_MOUNT_POINT` values default to
+`secure_data` and `/mnt/secure_data`. Successful provisioning creates a LUKS2
+container with an ext4 filesystem and idempotently records tagged entries in
+`/etc/crypttab` and `/etc/fstab`.
+
+## Disposable-VM usage
+
+Review the source and attach a dedicated test disk before running anything.
+Then select `cryptsetup_tools` and `encrypted_volume` through the component
+menu, or invoke the selected components directly with the required environment
+values. The installer intentionally uses an interactive `cryptsetup` passphrase
+prompt and never accepts a passphrase through an environment variable or
+command-line argument.
+
 ## Disclaimer
 
 This software is provided under the MIT License on an **“as is”** basis, without warranties of any kind. To the maximum extent permitted by applicable law, the authors and copyright holders shall not be liable for any claims, damages, losses, or other liability arising from the use of this software.
