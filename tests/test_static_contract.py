@@ -87,3 +87,22 @@ def test_components_declare_repo_identity() -> None:
     manifest = read("installer/components.sh")
     assert 'ISC_REPO_NAME="linux_luks_configuration"' in manifest
     assert "ISC_REPO_LABEL=" in manifest
+
+
+def test_target_device_prompted_explicitly_not_inferred() -> None:
+    """The interactive path must require an explicitly typed, re-confirmed device
+    (never inferred from root or the first disk), satisfying the safety boundary,
+    and expose --collect-config for the master to delegate to."""
+    implementation = read("lib/luks_configuration.sh")
+    installer = read("install.sh")
+
+    assert "luks_prompt_target_device()" in implementation
+    assert "luks_collect_config()" in implementation
+    # Explicit entry + exact re-type confirmation; no auto-selection of a disk.
+    assert "[ ! -b " in implementation or "[ -b " in implementation
+    assert "Re-type the device path to confirm" in implementation
+    # Must not auto-pick a device (no `head -1`/`awk NR==1` style first-disk grab).
+    assert "LUKS_TARGET_DEVICE=" in implementation
+    # Standalone prompts both device and passphrase up front; master delegates.
+    assert "luks_prompt_target_device" in installer
+    assert "--collect-config" in installer

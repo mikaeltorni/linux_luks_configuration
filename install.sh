@@ -41,10 +41,12 @@ luks_selection_requests_volume() {
 # main - dispatch the explicitly selected LUKS components.
 main() {
   msg "Starting explicitly selected LUKS configuration"
-  # Ask for the LUKS passphrase at the very beginning when the encrypted volume
-  # is selected, mirroring the master installer, so the (non-interactive) volume
-  # step never blocks for input later in the run.
+  # Ask for the target device and passphrase at the very beginning when the
+  # encrypted volume is selected, mirroring the master installer, so the
+  # (non-interactive) volume step never blocks for input later in the run.
+  # Both no-op when their LUKS_* env values are already provided.
   if luks_selection_requests_volume "$@"; then
+    luks_prompt_target_device || exit 1
     luks_prompt_passphrase || exit 1
   fi
   component_main "$@"
@@ -54,6 +56,13 @@ main() {
 case "${1:-}" in
   --list-components|--detect|--help|-h|--uninstall|--uninstall=*)
     component_main "$@"
+    exit $?
+    ;;
+  --collect-config)
+    # Used by the master installer: prompt for the target device + passphrase on
+    # the terminal it owns, write the resolved env to the given file, and exit
+    # without installing. The master then exports it for the Phase-2 child.
+    luks_collect_config "${2:-}"
     exit $?
     ;;
 esac

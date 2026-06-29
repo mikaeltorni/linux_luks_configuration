@@ -34,6 +34,62 @@ luks_prompt_passphrase() {
   export LUKS_PASSPHRASE="$first"
 }
 
+# luks_prompt_target_device - interactively choose and confirm the destructive
+# LUKS target device, exporting the env the volume step expects. No-op when
+# LUKS_TARGET_DEVICE is already provided (the scriptable, automation path). The
+# target is never inferred: the operator must type the device path and re-type it
+# to confirm, satisfying the repository's explicit-target / exact-confirmation /
+# opt-in-format safety boundary. Requires a terminal.
+luks_prompt_target_device() {
+  [ -n "${LUKS_TARGET_DEVICE:-}" ] && return 0
+  if [ ! -t 0 ] || [ ! -t 1 ]; then
+    msg "ERROR: LUKS target device required; set LUKS_TARGET_DEVICE or run on a terminal"
+    return 1
+  fi
+  printf 'Available block devices (the chosen target will be ERASED and encrypted):\n' >&2
+  lsblk -dno NAME,SIZE,TYPE,MODEL 2>/dev/null | sed 's/^/  \/dev\//' >&2 || true
+  local device canonical confirm
+  while true; do
+    printf 'LUKS target device path (e.g. /dev/vdb): ' >&2
+    IFS= read -r device
+    if [ -z "$device" ] || [ ! -b "$device" ]; then
+      printf 'Not a block device: %s\n' "${device:-<empty>}" >&2
+      continue
+    fi
+    canonical="$(readlink -f -- "$device")"
+    printf 'This DESTROYS all data on %s. Re-type the device path to confirm: ' "$canonical" >&2
+    IFS= read -r confirm
+    if [ -n "$confirm" ] && [ "$(readlink -f -- "$confirm" 2>/dev/null)" = "$canonical" ]; then
+      break
+    fi
+    printf 'Confirmation did not match; try again.\n' >&2
+  done
+  export LUKS_TARGET_DEVICE="$device"
+  export LUKS_CONFIRM_DEVICE="$canonical"
+  export LUKS_ALLOW_FORMAT=YES
+  export LUKS_ALLOW_WIPE_SIGNATURES=YES
+}
+
+# luks_collect_config - prompt for the target device and passphrase up front and,
+# when a destination file is given, write the resolved environment to it (mode
+# 0600). The master installer runs this with a terminal before Phase 2 and then
+# exports the values for the (stdin-detached) child run.
+luks_collect_config() {
+  local outfile="${1:-}"
+  luks_prompt_target_device || return 1
+  luks_prompt_passphrase || return 1
+  [ -z "$outfile" ] && return 0
+  ( umask 077
+    {
+      printf 'export LUKS_TARGET_DEVICE=%q\n' "$LUKS_TARGET_DEVICE"
+      printf 'export LUKS_CONFIRM_DEVICE=%q\n' "$LUKS_CONFIRM_DEVICE"
+      printf 'export LUKS_ALLOW_FORMAT=%q\n' "${LUKS_ALLOW_FORMAT:-YES}"
+      printf 'export LUKS_ALLOW_WIPE_SIGNATURES=%q\n' "${LUKS_ALLOW_WIPE_SIGNATURES:-YES}"
+      printf 'export LUKS_PASSPHRASE=%q\n' "$LUKS_PASSPHRASE"
+    } >"$outfile"
+  )
+}
+
 # install_cryptsetup_tools - install the distro-supported LUKS and ext4 tools.
 install_cryptsetup_tools() {
   msg "Installing LUKS tooling from Ubuntu repositories"
