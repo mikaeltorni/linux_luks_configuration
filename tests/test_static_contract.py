@@ -78,3 +78,12 @@ def test_passphrase_collected_up_front_and_used_non_interactively() -> None:
     # Standalone installer prompts at the beginning when the volume is selected.
     assert "luks_selection_requests_volume" in installer
     assert "luks_prompt_passphrase" in installer
+
+
+def test_components_declare_repo_identity() -> None:
+    """components.sh must set ISC_REPO_NAME; the shared run path references it
+    unconditionally (under set -u), so omitting it aborts every component run
+    with 'ISC_REPO_NAME: unbound variable'."""
+    manifest = read("installer/components.sh")
+    assert 'ISC_REPO_NAME="linux_luks_configuration"' in manifest
+    assert "ISC_REPO_LABEL=" in manifest
