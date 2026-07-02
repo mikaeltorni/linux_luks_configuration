@@ -54,7 +54,7 @@ main() {
 }
 
 case "${1:-}" in
-  --list-components|--detect|--help|-h|--uninstall|--uninstall=*)
+  --list-components|--export-selection|--detect|--help|-h|--uninstall|--uninstall=*)
     component_main "$@"
     exit $?
     ;;
