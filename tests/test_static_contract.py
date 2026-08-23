@@ -106,3 +106,21 @@ def test_target_device_prompted_explicitly_not_inferred() -> None:
     # Standalone prompts both device and passphrase up front; master delegates.
     assert "luks_prompt_target_device" in installer
     assert "--collect-config" in installer
+
+
+def test_missing_uninstall_steps_are_documented_as_deliberate() -> None:
+    """No-uninstall must be an explained safety decision, not a silent gap."""
+    components = read("installer/components.sh")
+    rows = [
+        line.strip().strip('"').split("|")
+        for line in components.splitlines()
+        if line.strip().startswith('"')
+    ]
+    assert rows, "the manifest must declare components"
+    assert all(len(row) < 6 or not row[5] for row in rows), (
+        "a component gained an uninstall step; document it and drop this guard"
+    )
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "No uninstall step, by design" in readme
+    for component_id in (row[0] for row in rows):
+        assert f"`{component_id}`" in readme

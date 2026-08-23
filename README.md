@@ -39,6 +39,17 @@ Optional `LUKS_MAPPING_NAME` and `LUKS_MOUNT_POINT` values default to
 container with an ext4 filesystem and idempotently records tagged entries in
 `/etc/crypttab` and `/etc/fstab`.
 
+### No uninstall step, by design
+
+Neither component declares an uninstall function, and that is deliberate rather
+than an omission. Reversing `encrypted_volume` would mean tearing down a
+container that holds your data, and reversing `cryptsetup_tools` would remove
+the very tooling needed to open any remaining LUKS volume on the machine —
+including ones this installer never created. `bash install.sh --uninstall` on
+these ids therefore only clears the install receipt; removing a container,
+its `/etc/crypttab` / `/etc/fstab` entries, or the `cryptsetup` packages stays a
+deliberate manual act.
+
 ## Disposable-VM usage
 
 Review the source and attach a dedicated test disk before running anything.
