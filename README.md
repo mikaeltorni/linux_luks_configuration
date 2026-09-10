@@ -55,9 +55,9 @@ deliberate manual act.
 Review the source and attach a dedicated test disk before running anything.
 Then select `cryptsetup_tools` and `encrypted_volume` through the component
 menu, or invoke the selected components directly with the required environment
-values. The installer intentionally uses an interactive `cryptsetup` passphrase
-prompt and never accepts a passphrase through an environment variable or
-command-line argument.
+values. The installer collects `LUKS_PASSPHRASE` up front (`luks_prompt_passphrase`
+or `--collect-config`) and feeds it to `cryptsetup` non-interactively with
+`--key-file -`, so a detached-stdin master run cannot hang on a mid-run prompt.
 
 ## Disclaimer
 

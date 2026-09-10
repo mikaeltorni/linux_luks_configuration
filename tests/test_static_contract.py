@@ -78,6 +78,10 @@ def test_passphrase_collected_up_front_and_used_non_interactively() -> None:
     # Standalone installer prompts at the beginning when the volume is selected.
     assert "luks_selection_requests_volume" in installer
     assert "luks_prompt_passphrase" in installer
+    readme = read("README.md")
+    assert "LUKS_PASSPHRASE" in readme
+    assert "--key-file -" in readme
+    assert "never accepts a passphrase through an environment variable" not in readme
 
 
 def test_components_declare_repo_identity() -> None:
