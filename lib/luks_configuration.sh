@@ -106,12 +106,15 @@ detect_cryptsetup_tools() {
   return 0
 }
 
-# require_luks_commands - validate runtime tools before inspecting a target.
+# Validate runtime tools before inspecting a target.
+# Parameters: none. Returns: zero if all required tools exist, one otherwise.
 require_luks_commands() {
+  printf 'parameters=none\n' >&2
   local command_name
   for command_name in cryptsetup findmnt lsblk wipefs blkid mkfs.ext4 mount; do
-    need_cmd "$command_name"
+    need_cmd "$command_name" || { printf '1\n' >&2; return 1; }
   done
+  printf '0\n' >&2
 }
 
 # canonical_luks_device - print and validate the explicitly configured device.
@@ -175,23 +178,28 @@ validate_luks_options() {
 }
 
 # require_format_confirmation - enforce exact acknowledgements for a new LUKS volume.
-# Args: $1 canonical block-device path.
+# Parameters: $1 - canonical block device. Returns: zero on consent, one otherwise.
 require_format_confirmation() {
+  printf 'device=%s\n' "$1" >&2
   local device="$1" signatures
   if [ "${LUKS_ALLOW_FORMAT:-}" != "YES" ]; then
     msg "ERROR: Set LUKS_ALLOW_FORMAT=YES to acknowledge destructive formatting"
+    printf '1\n' >&2
     return 1
   fi
   if [ "${LUKS_CONFIRM_DEVICE:-}" != "$device" ]; then
     msg "ERROR: LUKS_CONFIRM_DEVICE must exactly equal the canonical target: $device"
+    printf '1\n' >&2
     return 1
   fi
 
-  signatures="$(wipefs --no-act "$device" 2>/dev/null || true)"
+  signatures="$(wipefs --no-act "$device")" || { printf '1\n' >&2; return 1; }
   if [ -n "$signatures" ] && [ "${LUKS_ALLOW_WIPE_SIGNATURES:-}" != "YES" ]; then
     msg "ERROR: Existing signatures detected; set LUKS_ALLOW_WIPE_SIGNATURES=YES after review"
+    printf '1\n' >&2
     return 1
   fi
+  printf '0\n' >&2
 }
 
 # require_target_confirmation - require the canonical device for every volume action.
@@ -205,22 +213,27 @@ require_target_confirmation() {
 }
 
 # open_luks_mapping - open the target or verify an existing mapping.
-# Args: $1 device, $2 mapping name. Prints "opened" when it opens the mapping.
+# Parameters: $1 - canonical device; $2 - mapping name.
+# Returns: zero for a usable mapping, one otherwise. Prints "opened" for a new mapping.
 open_luks_mapping() {
+  printf 'device=%s mapping_name=%s\n' "$1" "$2" >&2
   local device="$1" mapping_name="$2" mapped_device="/dev/mapper/$2"
   if [ -e "$mapped_device" ]; then
     local active_device
     active_device="$(cryptsetup status "$mapping_name" | awk '$1 == "device:" { print $2; exit }')"
     if [ "$(readlink -f -- "$active_device")" != "$device" ]; then
       msg "ERROR: Existing mapping $mapping_name points to another device"
+      printf '1\n' >&2
       return 1
     fi
+    printf '0\n' >&2
     return 0
   fi
 
-  msg "Opening LUKS mapping $mapping_name with the pre-collected passphrase"
-  printf '%s' "${LUKS_PASSPHRASE:-}" | cryptsetup open --key-file - "$device" "$mapping_name"
+  msg "Opening LUKS mapping $mapping_name with the pre-collected passphrase" >&2
+  printf '%s' "${LUKS_PASSPHRASE:-}" | cryptsetup open --key-file - "$device" "$mapping_name" || { printf '1\n' >&2; return 1; }
   printf 'opened\n'
+  printf '0\n' >&2
 }
 
 # replace_tagged_line - atomically replace one repository-owned config record.
@@ -258,57 +271,70 @@ persist_luks_mapping() {
 }
 
 # configure_encrypted_volume - create or reuse one LUKS2/ext4 data volume.
+# Parameters: none. Returns: zero after mounting, one on rejection or failure.
 configure_encrypted_volume() {
+  printf 'parameters=none\n' >&2
   if ! is_root; then
     msg "ERROR: Encrypted-volume configuration requires sudo"
+    printf '1\n' >&2
     return 1
   fi
 
-  require_luks_commands
-  local device mapping_name mount_point mapping_state filesystem
-  device="$(canonical_luks_device)"
+  require_luks_commands || { printf '1\n' >&2; return 1; }
+  local device mapping_name mount_point mapping_state filesystem probe_status=0
+  device="$(canonical_luks_device)" || { printf '1\n' >&2; return 1; }
   mapping_name="${LUKS_MAPPING_NAME:-secure_data}"
   mount_point="${LUKS_MOUNT_POINT:-/mnt/secure_data}"
-  validate_luks_options "$mapping_name" "$mount_point"
-  assert_safe_luks_target "$device"
-  require_target_confirmation "$device"
+  validate_luks_options "$mapping_name" "$mount_point" || { printf '1\n' >&2; return 1; }
+  assert_safe_luks_target "$device" || { printf '1\n' >&2; return 1; }
+  require_target_confirmation "$device" || { printf '1\n' >&2; return 1; }
 
   # The passphrase is collected up front (luks_prompt_passphrase) so the format
   # and open steps run non-interactively. Re-prompt here only as a fallback when
   # a terminal is available; under the master installer it is already set.
-  luks_prompt_passphrase || return 1
+  luks_prompt_passphrase || { printf '1\n' >&2; return 1; }
 
   if ! cryptsetup isLuks "$device"; then
-    require_format_confirmation "$device"
+    require_format_confirmation "$device" || { printf '1\n' >&2; return 1; }
     msg "Formatting confirmed target as LUKS2: $device"
-    printf '%s' "$LUKS_PASSPHRASE" | cryptsetup luksFormat --type luks2 --batch-mode --key-file - "$device"
+    printf '%s' "$LUKS_PASSPHRASE" | cryptsetup luksFormat --type luks2 --batch-mode --key-file - "$device" || { printf '1\n' >&2; return 1; }
   else
     msg "Reusing existing LUKS container: $device"
   fi
 
-  mapping_state="$(open_luks_mapping "$device" "$mapping_name")"
-  filesystem="$(blkid -o value -s TYPE "/dev/mapper/$mapping_name" || true)"
+  mapping_state="$(open_luks_mapping "$device" "$mapping_name")" || { printf '1\n' >&2; return 1; }
+  filesystem="$(blkid -p -o value -s TYPE "/dev/mapper/$mapping_name")" || probe_status=$?
+  if (( probe_status != 0 && probe_status != 2 )); then
+    msg "ERROR: Unable to identify the filesystem in $mapping_name"
+    [ "$mapping_state" = "opened" ] && cryptsetup close "$mapping_name"
+    printf '1\n' >&2
+    return 1
+  fi
   if [ -z "$filesystem" ]; then
     msg "Creating ext4 filesystem inside $mapping_name"
     if ! mkfs.ext4 -L "$mapping_name" "/dev/mapper/$mapping_name"; then
       [ "$mapping_state" = "opened" ] && cryptsetup close "$mapping_name"
+      printf '1\n' >&2
       return 1
     fi
   elif [ "$filesystem" != "ext4" ]; then
     msg "ERROR: Existing mapped filesystem is $filesystem, expected ext4"
     [ "$mapping_state" = "opened" ] && cryptsetup close "$mapping_name"
+    printf '1\n' >&2
     return 1
   fi
 
-  persist_luks_mapping "$device" "$mapping_name" "$mount_point"
-  install -d -m 0755 "$mount_point"
+  persist_luks_mapping "$device" "$mapping_name" "$mount_point" || { printf '1\n' >&2; return 1; }
+  install -d -m 0755 "$mount_point" || { printf '1\n' >&2; return 1; }
   if ! findmnt -rn "$mount_point" >/dev/null; then
     if ! mount "/dev/mapper/$mapping_name" "$mount_point"; then
       [ "$mapping_state" = "opened" ] && cryptsetup close "$mapping_name"
+      printf '1\n' >&2
       return 1
     fi
   fi
   msg "Encrypted volume is mounted at $mount_point"
+  printf '0\n' >&2
 }
 
 # detect_encrypted_volume - detect only an explicitly named existing LUKS target.
