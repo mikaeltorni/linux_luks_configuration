@@ -59,6 +59,13 @@ values. The installer collects `LUKS_PASSPHRASE` up front (`luks_prompt_passphra
 or `--collect-config`) and feeds it to `cryptsetup` non-interactively with
 `--key-file -`, so a detached-stdin master run cannot hang on a mid-run prompt.
 
+The VM-only regression is `sudo bash tests/check_disposable_vm.sh "$PWD"`.
+It expects the disposable guest hostname and cloud-init instance ID
+`mt-stack-luks-fixture`, a blank 192 MiB VirtIO disk with serial
+`mtstack-luks-fixture`, and Ubuntu package access. It exercises default-off
+selection, required consent, detection, reconfiguring a closed volume, and
+receipt removal while checking that the volume data survives.
+
 ## Disclaimer
 
 This software is provided under the MIT License on an **“as is”** basis, without warranties of any kind. To the maximum extent permitted by applicable law, the authors and copyright holders shall not be liable for any claims, damages, losses, or other liability arising from the use of this software.
